@@ -18,7 +18,7 @@
 * 開發工具：Git / GitHub 進行版本控制。
 
 ### 時程規劃
-* Week 7-8：繳交 Proposal，建立 GitHub Repo，並準備一份只有 5 種貨幣的假資料 (Mock Data)。
+* Week 7-8：繳交 Proposal，建立 GitHub Repo，並準備一份只有 5 種貨幣的假資料。
 * Week 9-10：將假資料讀入程式，實作 Graph 資料結構，並寫出尋找長度為 3 的 DFS 搜尋邏輯。
 * Week 11：程式能成功讀取資料並跑出結果（即使介面很簡陋也沒關係），發布 Prototype Release。
 * Week 12-13：不增加新功能。專注於修復程式 Bug，處理極端狀況（例如找不到套利路徑時程式不會崩潰），並補齊程式碼註解。
