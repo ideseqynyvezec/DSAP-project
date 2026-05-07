@@ -1,4 +1,3 @@
-// src/main.cpp
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -6,154 +5,120 @@
 #include <windows.h>
 #include <fstream>
 #include <sstream>
+#include <chrono>
+#include <map>
 
 using namespace std;
 
-class ArbitrageGraph {
+// 定義單一時間點的市場狀態
+struct MarketSnapshot {
+    long long L_timestamp;
+    // 儲存該時刻的圖：Source -> (Target -> Rate)
+    unordered_map<string, unordered_map<string, double>> M_rates;
+};
+
+class HistoricalBacktester {
 private:
-    // 外層的 Key 是來源貨幣，內層是 (目標貨幣 -> 匯率)
-    unordered_map<string, unordered_map<string, double>> M_exchangeRates;
-    int N_totalCurrency;
+    // 使用 map 確保時間快照按順序排列
+    map<long long, MarketSnapshot> M_allSnapshots;
 
 public:
-    ArbitrageGraph() : N_totalCurrency(0) {}
-
-    // 新增匯率邊
-    void addExchangeRate(const string& sourceCurrency, const string& targetCurrency, double rate) {
-        if (M_exchangeRates.find(sourceCurrency) == M_exchangeRates.end()) {
-            N_totalCurrency++;
-        }
-        M_exchangeRates[sourceCurrency][targetCurrency] = rate;
-    }
-
-    // 顯示目前的圖結構，用於 Debug
-    void printGraph() {
-        cout << "目前共有 " << N_totalCurrency << " 種貨幣參與運算。\n";
-        for (const auto& sourcePair : M_exchangeRates) {
-            for (const auto& targetPair : sourcePair.second) {
-                cout << sourcePair.first << " -> " << targetPair.first 
-                     << " : " << targetPair.second << "\n";
-            }
-        }
-    }
-    
-    // 取得內部資料結構
-    const unordered_map<string, unordered_map<string, double>>& getGraphData() const {
-        return M_exchangeRates;
-    }
-
-    // 基礎 DFS：尋找長度為 3 的三角套利路徑
-    void findTriangularArbitrage(const string& startCurrency) {
-        if (M_exchangeRates.find(startCurrency) == M_exchangeRates.end()) {
-            cout << "找不到起始貨幣：" << startCurrency << "\n";
-            return;
-        }
-
-        bool B_foundOpportunity = false;
-        const auto& graphData = M_exchangeRates;
-
-        // Step 1: 從起點出發到第一層 (Currency A)
-        for (const auto& step1 : graphData.at(startCurrency)) {
-            string currencyA = step1.first;
-            double rate_Start_to_A = step1.second;
-
-            if (graphData.find(currencyA) == graphData.end()) continue;
-
-            // Step 2: 從第一層到第二層 (Currency B)
-            for (const auto& step2 : graphData.at(currencyA)) {
-                string currencyB = step2.first;
-                double rate_A_to_B = step2.second;
-
-                if (graphData.find(currencyB) == graphData.end()) continue;
-
-                // Step 3: 從第二層找尋回到起點的路徑
-                for (const auto& step3 : graphData.at(currencyB)) {
-                    if (step3.first == startCurrency) {
-                        double rate_B_to_Start = step3.second;
-                        
-                        // 計算循環匯率乘積
-                        double finalProfit = rate_Start_to_A * rate_A_to_B * rate_B_to_Start;
-                        
-                        // 如果大於 1，代表存在套利空間
-                        if (finalProfit > 1.0) {
-                            cout << "[發現套利機會!] " 
-                                 << startCurrency << " -> " << currencyA << " -> " 
-                                 << currencyB << " -> " << startCurrency << "\n";
-                            cout << "預期利潤率: " << (finalProfit - 1.0) * 100 << "%\n\n";
-                            B_foundOpportunity = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!B_foundOpportunity) {
-            cout << "在 " << startCurrency << " 開頭的路徑中，目前沒有發現三角套利空間。\n";
-        }
-    }
-
-    // 讀取外部 CSV 檔案並建構圖
-    bool loadDataFromCSV(const string& S_filePath) {
-        ifstream F_inputFile(S_filePath);
-        
-        // 檢查檔案是否成功開啟
-        if (!F_inputFile.is_open()) {
-            cout << "[錯誤]無法開啟檔案：" << S_filePath << "\n";
-            cout << "請確認檔案名稱與路徑是否正確。\n";
+    // 讀取歷史 CSV 檔案
+    bool loadHistoricalData(const string& S_filePath) {
+        ifstream F_input(S_filePath);
+        if (!F_input.is_open()) {
+            cout << "[錯誤]找不到檔案：" << S_filePath << "\n";
             return false;
         }
 
         string S_line;
-        
-        // 讀取第一行 (標題行)，不需要把它當作資料處理，讀完就放著
-        getline(F_inputFile, S_line); 
+        getline(F_input, S_line); // 跳過標題列
 
-        // 迴圈讀取接下來的每一行，直到檔案結束
         int N_rowCount = 0;
-        while (getline(F_inputFile, S_line)) {
+        while (getline(F_input, S_line)) {
+            if (S_line.empty() || S_line == "\r") continue;
+            
             stringstream SS_row(S_line);
-            string S_source, S_target, S_rateStr;
-            double D_rate;
-
-            // 根據逗號 ',' 來切割這一行的字串
-            getline(SS_row, S_source, ',');
-            getline(SS_row, S_target, ',');
+            string S_tsStr, S_src, S_dst, S_rateStr;
+            
+            getline(SS_row, S_tsStr, ',');
+            getline(SS_row, S_src, ',');
+            getline(SS_row, S_dst, ',');
             getline(SS_row, S_rateStr, ',');
 
-            // 將切出來的匯率字串轉換成浮點數
-            D_rate = stod(S_rateStr);
+            long long L_ts = stoll(S_tsStr);
+            double D_rate = stod(S_rateStr);
 
-            // 呼叫寫好的函式，把這筆資料加入圖中
-            addExchangeRate(S_source, S_target, D_rate);
+            M_allSnapshots[L_ts].L_timestamp = L_ts;
+            M_allSnapshots[L_ts].M_rates[S_src][S_dst] = D_rate;
             N_rowCount++;
         }
-
-        F_inputFile.close();
-        cout << "成功讀取檔案！共載入 " << N_rowCount << " 筆匯率資料。\n";
+        
+        cout << "成功載入真實數據！共計 " << M_allSnapshots.size() << " 個小時快照。\n";
         return true;
     }
-}; 
 
-int main() {
-    // 強制將終端機輸出編碼設定為 UTF-8
-    SetConsoleOutputCP(CP_UTF8);
+    // 執行全量回測
+    void runFullBacktest(const string& S_startCurrency) {
+        int N_totalOpportunities = 0;
+        double D_maxProfit = 0.0;
 
-    ArbitrageGraph market;
+        cout << "\n--- 開始歷史回測 (Research Mode) ---\n";
+        
+        auto start_timer = chrono::high_resolution_clock::now();
 
-    cout << "=== 系統初始化中 ===\n";
-    // 呼叫讀取 CSV 的函式，傳入相對路徑
-    bool B_loadSuccess = market.loadDataFromCSV("market_data.csv");
+        for (auto const& [L_ts, snapshot] : M_allSnapshots) {
+            double D_profit = checkArbitrage(snapshot, S_startCurrency);
+            if (D_profit > 1.0) {
+                N_totalOpportunities++;
+                if (D_profit > D_maxProfit) D_maxProfit = D_profit;
+                
+                // 轉換時間戳記為可讀格式 (簡單處理)
+                cout << "[時間戳 " << L_ts << "] 發現機會！收益率: " << (D_profit - 1) * 100 << "%\n";
+            }
+        }
 
-    // 如果檔案讀取失敗，就直接結束程式
-    if (!B_loadSuccess) {
-        return 1; 
+        auto end_timer = chrono::high_resolution_clock::now();
+        chrono::duration<double, milli> D_execTime = end_timer - start_timer;
+
+        cout << "\n========================================\n";
+        cout << "分析報告：\n";
+        cout << "- 掃描快照數: " << M_allSnapshots.size() << "\n";
+        cout << "- 發現套利總次數: " << N_totalOpportunities << "\n";
+        cout << "- 歷史最大收益率: " << (D_maxProfit > 0 ? (D_maxProfit - 1) * 100 : 0) << "%\n";
+        cout << "- 總執行耗時: " << D_execTime.count() << " 毫秒 (ms)\n";
+        cout << "========================================\n";
     }
 
-    cout << "\n=== 市場匯率表 ===\n";
-    market.printGraph();
-    
-    cout << "\n=== 執行三角套利偵測 ===\n";
-    market.findTriangularArbitrage("TWD");
+private:
+    // 核心偵測演算法 (DFS 模式)
+    double checkArbitrage(const MarketSnapshot& snapshot, const string& S_start) {
+        const auto& M_data = snapshot.M_rates;
+        if (M_data.find(S_start) == M_data.end()) return 0.0;
+
+        for (auto const& [S_currA, D_rateA] : M_data.at(S_start)) {
+            if (M_data.find(S_currA) == M_data.end()) continue;
+            for (auto const& [S_currB, D_rateB] : M_data.at(S_currA)) {
+                if (M_data.find(S_currB) == M_data.end()) continue;
+                if (M_data.at(S_currB).count(S_start)) {
+                    double D_totalRate = D_rateA * D_rateB * M_data.at(S_currB).at(S_start);
+                    // 考量法幣極高效率，門檻設極低 (1.00001) 進行研究
+                    if (D_totalRate > 1.00001) return D_totalRate;
+                }
+            }
+        }
+        return 0.0;
+    }
+};
+
+int main() {
+    SetConsoleOutputCP(CP_UTF8);
+    HistoricalBacktester backtester;
+
+    // 讀取剛剛 Python 抓取的真實法幣資料
+    if (backtester.loadHistoricalData("fiat_historical_rates.csv")) {
+        backtester.runFullBacktest("USD");
+    }
 
     return 0;
 }
