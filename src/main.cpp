@@ -4,6 +4,8 @@
 #include <unordered_map>
 #include <vector>
 #include <windows.h>
+#include <fstream>
+#include <sstream>
 
 using namespace std;
 
@@ -89,6 +91,47 @@ public:
             cout << "在 " << startCurrency << " 開頭的路徑中，目前沒有發現三角套利空間。\n";
         }
     }
+
+    // 讀取外部 CSV 檔案並建構圖
+    bool loadDataFromCSV(const string& S_filePath) {
+        ifstream F_inputFile(S_filePath);
+        
+        // 檢查檔案是否成功開啟
+        if (!F_inputFile.is_open()) {
+            cout << "[錯誤]無法開啟檔案：" << S_filePath << "\n";
+            cout << "請確認檔案名稱與路徑是否正確。\n";
+            return false;
+        }
+
+        string S_line;
+        
+        // 讀取第一行 (標題行)，不需要把它當作資料處理，讀完就放著
+        getline(F_inputFile, S_line); 
+
+        // 迴圈讀取接下來的每一行，直到檔案結束
+        int N_rowCount = 0;
+        while (getline(F_inputFile, S_line)) {
+            stringstream SS_row(S_line);
+            string S_source, S_target, S_rateStr;
+            double D_rate;
+
+            // 根據逗號 ',' 來切割這一行的字串
+            getline(SS_row, S_source, ',');
+            getline(SS_row, S_target, ',');
+            getline(SS_row, S_rateStr, ',');
+
+            // 將切出來的匯率字串轉換成浮點數
+            D_rate = stod(S_rateStr);
+
+            // 呼叫寫好的函式，把這筆資料加入圖中
+            addExchangeRate(S_source, S_target, D_rate);
+            N_rowCount++;
+        }
+
+        F_inputFile.close();
+        cout << "成功讀取檔案！共載入 " << N_rowCount << " 筆匯率資料。\n";
+        return true;
+    }
 }; 
 
 int main() {
@@ -97,20 +140,19 @@ int main() {
 
     ArbitrageGraph market;
 
-    // 先寫入一些測試假資料 (其中 TWD -> USD -> JPY -> TWD 會大於 1)
-    market.addExchangeRate("TWD", "USD", 0.032);
-    market.addExchangeRate("USD", "JPY", 145.5);
-    market.addExchangeRate("JPY", "TWD", 0.22); // 0.032 * 145.5 * 0.22 = 1.02432 (約 2.4% 利潤)
+    cout << "=== 系統初始化中 ===\n";
+    // 呼叫讀取 CSV 的函式，傳入相對路徑
+    bool B_loadSuccess = market.loadDataFromCSV("market_data.csv");
 
-    // 一條不會賺錢的路徑
-    market.addExchangeRate("TWD", "EUR", 0.029);
-    market.addExchangeRate("EUR", "GBP", 0.85);
-    market.addExchangeRate("GBP", "TWD", 40.0); // 0.029 * 0.85 * 40 = 0.986 (虧損)
+    // 如果檔案讀取失敗，就直接結束程式
+    if (!B_loadSuccess) {
+        return 1; 
+    }
 
-    cout << "=== 市場匯率表 ===\n";
+    cout << "\n=== 市場匯率表 ===\n";
     market.printGraph();
-    cout << "\n=== 執行三角套利偵測 ===\n";
     
+    cout << "\n=== 執行三角套利偵測 ===\n";
     market.findTriangularArbitrage("TWD");
 
     return 0;
