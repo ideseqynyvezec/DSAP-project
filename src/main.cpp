@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <windows.h>
 
 using namespace std;
 
@@ -38,9 +39,8 @@ public:
     const unordered_map<string, unordered_map<string, double>>& getGraphData() const {
         return M_exchangeRates;
     }
-};
 
-// 基礎 DFS：尋找長度為 3 的三角套利路徑
+    // 基礎 DFS：尋找長度為 3 的三角套利路徑
     void findTriangularArbitrage(const string& startCurrency) {
         if (M_exchangeRates.find(startCurrency) == M_exchangeRates.end()) {
             cout << "找不到起始貨幣：" << startCurrency << "\n";
@@ -89,8 +89,12 @@ public:
             cout << "在 " << startCurrency << " 開頭的路徑中，目前沒有發現三角套利空間。\n";
         }
     }
+}; 
 
 int main() {
+    // 強制將終端機輸出編碼設定為 UTF-8
+    SetConsoleOutputCP(CP_UTF8);
+
     ArbitrageGraph market;
 
     // 先寫入一些測試假資料 (其中 TWD -> USD -> JPY -> TWD 會大於 1)
